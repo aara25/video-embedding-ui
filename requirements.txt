@@ -6,3 +6,4 @@ numpy
 langchain
 pypdf
 python-docx
+langchain-google-vertexai
