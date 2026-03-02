@@ -274,8 +274,8 @@ if uploaded:
         st.write(summary)
 
         # Step 4: Store transcript embeddings
-        # with st.spinner("Embedding transcript for semantic search..."):
-            # embed_text_chunks(transcript, uploaded.name)
+        with st.spinner("Embedding transcript for semantic search..."):
+            embed_text_chunks(transcript, uploaded.name)
 
         st.success("✅ Video Processed & Embedded Successfully!")
 
