@@ -274,8 +274,8 @@ if uploaded:
         st.write(summary)
 
         # Step 4: Store transcript embeddings
-        with st.spinner("Embedding transcript for semantic search..."):
-            embed_text_chunks(transcript, uploaded.name)
+        # with st.spinner("Embedding transcript for semantic search..."):
+            # embed_text_chunks(transcript, uploaded.name)
 
         st.success("✅ Video Processed & Embedded Successfully!")
 
@@ -345,46 +345,62 @@ if st.button("Ask") and query:
     retrieved = search(query, k=5)
 
     if not retrieved:
-        st.warning("I haven't learned anything yet! Please upload content first.")
+        st.write("I haven't learned anything yet! Please upload some content first.")
     else:
-        item = retrieved[0]["data"]
+        item = retrieved[0]  # assuming your search returns metadata directly
 
-        context = ""
+        file_path = item.get("path")
+        file_type = item.get("type")
 
-        # -------- TEXT --------
-        if item["type"] == "text":
-            context = item["content"]
+        # Prepare multimodal prompt
+        prompt_parts = [
+            f"Answer the question based on the provided content.\n\nQuestion: {query}"
+        ]
 
-        # -------- IMAGE --------
-        elif item["type"] == "image":
-            context = f"This question relates to the image stored at {item.get('path','')}."
+        try:
+            # -------- IMAGE --------
+            if file_type == "image" and file_path:
+                with open(file_path, "rb") as f:
+                    file_bytes = f.read()
 
-        # -------- VIDEO --------
-        elif item["type"] == "video":
-            context = (
-                f"This question relates to video segment "
-                f"{item['start']}s to {item['end']}s "
-                f"from {item.get('gcs_uri','')}."
-            )
+                prompt_parts.append(
+                    Part.from_data(data=file_bytes, mime_type="image/jpeg")
+                )
 
-        # -------- STREAM CHAT RESPONSE --------
-        with st.container():
-            st.subheader("🧠 Answer")
+            # -------- VIDEO --------
+            elif file_type == "video" and file_path:
+                with open(file_path, "rb") as f:
+                    file_bytes = f.read()
 
-            response_stream = gemini_model.generate_content(
-                f"Context:\n{context}\n\nQuestion:{query}",
-                stream=True
-            )
+                prompt_parts.append(
+                    Part.from_data(data=file_bytes, mime_type="video/mp4")
+                )
 
-            full_response = ""
-            placeholder = st.empty()
+            # -------- TEXT CONTEXT --------
+            if "content" in item:
+                prompt_parts.append(f"\nContext:\n{item['content']}")
 
-            for chunk in response_stream:
-                if hasattr(chunk, "text") and chunk.text:
-                    full_response += chunk.text
-                    placeholder.markdown(full_response + "▌")
+            # -------- STREAM RESPONSE --------
+            with st.container():
+                st.subheader("🧠 Answer")
 
-            placeholder.markdown(full_response)
+                response_stream = gemini_model.generate_content(
+                    prompt_parts,
+                    stream=True
+                )
+
+                full_response = ""
+                placeholder = st.empty()
+
+                for chunk in response_stream:
+                    if hasattr(chunk, "text") and chunk.text:
+                        full_response += chunk.text
+                        placeholder.markdown(full_response + "▌")
+
+                placeholder.markdown(full_response)
+
+        except Exception as e:
+            st.error(f"Error during chat: {str(e)}")
 
 st.divider()
 st.write(f"Vector DB Size: {len(st.session_state.metadata)}")
