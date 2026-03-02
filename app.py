@@ -41,7 +41,7 @@ embedding_model = MultiModalEmbeddingModel.from_pretrained(
 print(st.secrets["GOOGLE_API_KEY"])
 gemini_model = GenerativeModel("gemini-2.5-flash")
 chat_model = init_chat_model("gemini-2.5-flash",
-    model_provider="google_vertexai",
+    model_provider="google_genai",
     api_key=st.secrets["GOOGLE_API_KEY"])
 
 # -----------------------------------
