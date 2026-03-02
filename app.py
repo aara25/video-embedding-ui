@@ -42,9 +42,7 @@ embedding_model = MultiModalEmbeddingModel.from_pretrained(
     "multimodalembedding@001"
 )
 gemini_model = GenerativeModel("gemini-2.5-flash")
-chat_model = init_chat_model("gpt-4o-mini",
-    model_provider="openai",
-    api_key=st.secrets["GOOGLE_API_KEY"])
+chat_model = GenerativeModel("gemini-2.5-flash")
 
 def upload_to_gcs(local_path, bucket_name, blob_name):
     client = storage.Client(credentials=credentials)
@@ -344,21 +342,34 @@ st.header("💬 Chat with Your Data")
 
 query = st.text_input("Ask something...")
 
-if st.button("Ask"):
-    results = search(query)
+if st.button("Ask") and query:
 
-    if not results:
-        st.warning("No relevant results found.")
+    retrieved = search(query, k=1)
+
+    if not retrieved:
+        st.warning("I haven't learned anything yet! Please upload content first.")
     else:
-        context = ""
-        for r in results:
-            if r["data"]["type"] == "text":
-                context += r["data"]["content"] + "\n"
-            elif r["data"]["type"] == "image":
-                context += f"Image file: {r["data"]["path"]}\n"
-            elif r["data"]["type"] == "video":
-                context += f"Video segment {r["data"]["start"]}-{r["data"]["end"]} sec\n"
+        item = retrieved[0]["data"]
 
+        context = ""
+
+        # -------- TEXT --------
+        if item["type"] == "text":
+            context = item["content"]
+
+        # -------- IMAGE --------
+        elif item["type"] == "image":
+            context = f"This question relates to the image stored at {item.get('path','')}."
+
+        # -------- VIDEO --------
+        elif item["type"] == "video":
+            context = (
+                f"This question relates to video segment "
+                f"{item['start']}s to {item['end']}s "
+                f"from {item.get('gcs_uri','')}."
+            )
+
+        # -------- STREAM CHAT RESPONSE --------
         with st.container():
             st.subheader("🧠 Answer")
 
@@ -372,7 +383,9 @@ if st.button("Ask"):
             for chunk in response_stream:
                 if chunk.content:
                     full_response += chunk.content
-                    placeholder.markdown(full_response)
+                    placeholder.markdown(full_response + "▌")
+
+            placeholder.markdown(full_response)
 
 st.divider()
 st.write(f"Vector DB Size: {len(st.session_state.metadata)}")
