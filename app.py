@@ -38,7 +38,7 @@ vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
 embedding_model = MultiModalEmbeddingModel.from_pretrained(
     "multimodalembedding@001"
 )
-
+print(st.secrets["GOOGLE_API_KEY"])
 gemini_model = GenerativeModel("gemini-2.5-flash")
 chat_model = init_chat_model("gemini-2.5-flash",
     model_provider="google_genai",
