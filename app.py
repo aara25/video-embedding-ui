@@ -27,7 +27,7 @@ from docx import Document
 
 PROJECT_ID = "video-embedding-488510"
 LOCATION = "us-central1"
-BUCKET_NAME = "multimodal-rag-bucket"
+BUCKET_NAME = "multimodal_rag_01"
 EMBED_DIM = 1408
 
 credentials = service_account.Credentials.from_service_account_info(
