@@ -7,3 +7,4 @@ langchain
 pypdf
 python-docx
 langchain-google-vertexai
+langchain-google-genai
