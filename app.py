@@ -379,8 +379,8 @@ if st.button("Ask") and query:
             placeholder = st.empty()
 
             for chunk in response_stream:
-                if chunk.content:
-                    full_response += chunk.content
+                if hasattr(chunk, "text") and chunk.text:
+                    full_response += chunk.text
                     placeholder.markdown(full_response + "▌")
 
             placeholder.markdown(full_response)
