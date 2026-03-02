@@ -8,3 +8,4 @@ pypdf
 python-docx
 langchain-google-vertexai
 langchain-google-genai
+langchain-openai
