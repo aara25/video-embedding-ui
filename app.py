@@ -353,9 +353,7 @@ if st.button("Ask") and query:
         file_type = item.get("type")
 
         # Prepare multimodal prompt
-        prompt_parts = [
-            f"Answer the question based on the provided content.\n\nQuestion: {query}"
-        ]
+        prompt_parts = [query]
 
         try:
             # -------- IMAGE --------
