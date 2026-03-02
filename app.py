@@ -155,28 +155,48 @@ def embed_video(path):
 # -----------------------------------
 # VIDEO TRANSCRIPT
 # -----------------------------------
-
 def transcribe_video(path):
     with open(path, "rb") as f:
         video_bytes = f.read()
 
-    response = gemini_model.generate_content([
-        "Transcribe the speech in this video accurately in english with user diarriazation. "
-        "Return only the spoken words.",
-        Part.from_data(data=video_bytes, mime_type="video/mp4"),
-    ])
+    response_stream = gemini_model.generate_content(
+        [
+            "Transcribe the speech in this video accurately in English with user diarization. "
+            "Return only the spoken words.",
+            Part.from_data(data=video_bytes, mime_type="video/mp4"),
+        ],
+        stream=True,
+    )
 
-    return response.text
+    transcript = ""
+    placeholder = st.empty()
+
+    for chunk in response_stream:
+        if chunk.text:
+            transcript += chunk.text
+            placeholder.markdown(transcript)
+
+    return transcript
 
 # -----------------------------------
 # SUMMARY
 # -----------------------------------
 
 def summarize(text):
-    response = gemini_model.generate_content(
-        f"Give a concise summary of this:\n{text}"
+    response_stream = gemini_model.generate_content(
+        f"Give a concise summary of this:\n{text}",
+        stream=True,
     )
-    return response.text
+
+    summary = ""
+    placeholder = st.empty()
+
+    for chunk in response_stream:
+        if chunk.text:
+            summary += chunk.text
+            placeholder.markdown(summary)
+
+    return summary
 
 # -----------------------------------
 # STREAMLIT UI
@@ -197,35 +217,58 @@ if uploaded:
 
     ext = uploaded.name.split(".")[-1]
 
+    # ---------------- PDF ----------------
     if ext == "pdf":
-        text = extract_text_from_pdf(path)
-        embed_text_chunks(text, uploaded.name)
-        st.success("PDF Embedded!")
+        with st.spinner("Extracting and embedding PDF..."):
+            text = extract_text_from_pdf(path)
+            embed_text_chunks(text, uploaded.name)
 
+        st.success("PDF Embedded Successfully!")
+
+    # ---------------- DOCX ----------------
     elif ext == "docx":
-        text = extract_text_from_docx(path)
-        embed_text_chunks(text, uploaded.name)
-        st.success("DOCX Embedded!")
+        with st.spinner("Extracting and embedding DOCX..."):
+            text = extract_text_from_docx(path)
+            embed_text_chunks(text, uploaded.name)
 
+        st.success("DOCX Embedded Successfully!")
+
+    # ---------------- IMAGE ----------------
     elif ext in ["jpg", "png", "jpeg"]:
         st.image(uploaded)
-        embed_image(path)
-        st.success("Image Embedded!")
 
+        with st.spinner("Generating image embedding..."):
+            embed_image(path)
+
+        st.success("Image Embedded Successfully!")
+
+    # ---------------- VIDEO ----------------
     elif ext == "mp4":
         st.video(uploaded)
-        embed_video(path)
-        transcript = transcribe_video(path)
-        summary = summarize(transcript)
 
-        st.subheader("Transcript")
-        st.write(transcript)
+        # Step 1: Video Embedding
+        with st.spinner("Generating video segment embeddings..."):
+            embed_video(path)
+
+        # Step 2: Transcript
+        with st.spinner("Transcribing video..."):
+            transcript = transcribe_video(path)
+
+            st.subheader("Transcript")
+            st.write(transcript)
+
+        # Step 3: Summary
+        with st.spinner("Generating summary..."):
+            summary = summarize(transcript)
 
         st.subheader("Summary")
         st.write(summary)
 
-        embed_text_chunks(transcript, uploaded.name)
-        st.success("Video Embedded + Transcript Stored!")
+        # Step 4: Store transcript embeddings
+        with st.spinner("Embedding transcript for semantic search..."):
+            embed_text_chunks(transcript, uploaded.name)
+
+        st.success("✅ Video Processed & Embedded Successfully!")
 
 def search(query, k=5):
     if st.session_state.index.ntotal == 0:
@@ -303,12 +346,20 @@ if st.button("Ask"):
             elif r["data"]["type"] == "video":
                 context += f"Video segment {r["data"]["start"]}-{r["data"]["end"]} sec\n"
 
-        response = chat_model.invoke(
-            [HumanMessage(content=f"Context:\n{context}\n\nQuestion:{query}")]
-        )
+        with st.container():
+            st.subheader("🧠 Answer")
 
-        st.write("### 🧠 Answer")
-        st.write(response.content)
+            response_stream = chat_model.stream(
+                [HumanMessage(content=f"Context:\n{context}\n\nQuestion:{query}")]
+            )
+
+            full_response = ""
+            placeholder = st.empty()
+
+            for chunk in response_stream:
+                if chunk.content:
+                    full_response += chunk.content
+                    placeholder.markdown(full_response)
 
 st.divider()
 st.write(f"Vector DB Size: {len(st.session_state.metadata)}")
