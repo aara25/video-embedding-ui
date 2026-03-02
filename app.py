@@ -273,9 +273,9 @@ if uploaded:
         st.subheader("Summary")
         st.write(summary)
 
-        # # Step 4: Store transcript embeddings
-        # with st.spinner("Embedding transcript for semantic search..."):
-        #     embed_text_chunks(transcript, uploaded.name)
+        # Step 4: Store transcript embeddings
+        with st.spinner("Embedding transcript for semantic search..."):
+            embed_text_chunks(transcript, uploaded.name)
 
         st.success("✅ Video Processed & Embedded Successfully!")
 
@@ -342,7 +342,7 @@ query = st.text_input("Ask something...")
 
 if st.button("Ask") and query:
 
-    retrieved = search(query, k=1)
+    retrieved = search(query, k=5)
 
     if not retrieved:
         st.warning("I haven't learned anything yet! Please upload content first.")
