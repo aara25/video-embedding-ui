@@ -294,12 +294,12 @@ if st.button("Ask"):
         st.warning("No relevant results found.")
     else:
         context = ""
-        for r in results:
-            if r["data"]["type"] == "text":
+        for r["data"] in results:
+            if r["type"] == "text":
                 context += r["content"] + "\n"
-            elif r["data"]["type"] == "image":
+            elif r["type"] == "image":
                 context += f"Image file: {r['path']}\n"
-            elif r["data"]["type"] == "video":
+            elif r["type"] == "video":
                 context += f"Video segment {r['start']}-{r['end']} sec\n"
 
         response = chat_model.invoke(
