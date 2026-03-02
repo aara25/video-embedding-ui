@@ -336,71 +336,71 @@ if st.button("Search"):
 
             st.divider()
 
-st.header("💬 Chat with Your Data")
+# st.header("💬 Chat with Your Data")
 
-query = st.text_input("Ask something...")
+# query = st.text_input("Ask something...")
 
-if st.button("Ask") and query:
+# if st.button("Ask") and query:
 
-    retrieved = search(query, k=5)
+#     retrieved = search(query, k=5)
 
-    if not retrieved:
-        st.write("I haven't learned anything yet! Please upload some content first.")
-    else:
-        item = retrieved[0]  # assuming your search returns metadata directly
+#     if not retrieved:
+#         st.write("I haven't learned anything yet! Please upload some content first.")
+#     else:
+#         item = retrieved[0]  # assuming your search returns metadata directly
 
-        file_path = item.get("path")
-        file_type = item.get("type")
+#         file_path = item.get("path")
+#         file_type = item.get("type")
 
-        # Prepare multimodal prompt
-        prompt_parts = [
-            f"Answer the question based on the provided content.\n\nQuestion: {query}"
-        ]
+#         # Prepare multimodal prompt
+#         prompt_parts = [
+#             f"Answer the question based on the provided content.\n\nQuestion: {query}"
+#         ]
 
-        try:
-            # -------- IMAGE --------
-            if file_type == "image" and file_path:
-                with open(file_path, "rb") as f:
-                    file_bytes = f.read()
+#         try:
+#             # -------- IMAGE --------
+#             if file_type == "image" and file_path:
+#                 with open(file_path, "rb") as f:
+#                     file_bytes = f.read()
 
-                prompt_parts.append(
-                    Part.from_data(data=file_bytes, mime_type="image/jpeg")
-                )
+#                 prompt_parts.append(
+#                     Part.from_data(data=file_bytes, mime_type="image/jpeg")
+#                 )
 
-            # -------- VIDEO --------
-            elif file_type == "video" and file_path:
-                with open(file_path, "rb") as f:
-                    file_bytes = f.read()
+#             # -------- VIDEO --------
+#             elif file_type == "video" and file_path:
+#                 with open(file_path, "rb") as f:
+#                     file_bytes = f.read()
 
-                prompt_parts.append(
-                    Part.from_data(data=file_bytes, mime_type="video/mp4")
-                )
+#                 prompt_parts.append(
+#                     Part.from_data(data=file_bytes, mime_type="video/mp4")
+#                 )
 
-            # -------- TEXT CONTEXT --------
-            if "content" in item:
-                prompt_parts.append(f"\nContext:\n{item['content']}")
+#             # -------- TEXT CONTEXT --------
+#             if "content" in item:
+#                 prompt_parts.append(f"\nContext:\n{item['content']}")
 
-            # -------- STREAM RESPONSE --------
-            with st.container():
-                st.subheader("🧠 Answer")
+#             # -------- STREAM RESPONSE --------
+#             with st.container():
+#                 st.subheader("🧠 Answer")
 
-                response_stream = gemini_model.generate_content(
-                    prompt_parts,
-                    stream=True
-                )
+#                 response_stream = gemini_model.generate_content(
+#                     prompt_parts,
+#                     stream=True
+#                 )
 
-                full_response = ""
-                placeholder = st.empty()
+#                 full_response = ""
+#                 placeholder = st.empty()
 
-                for chunk in response_stream:
-                    if hasattr(chunk, "text") and chunk.text:
-                        full_response += chunk.text
-                        placeholder.markdown(full_response + "▌")
+#                 for chunk in response_stream:
+#                     if hasattr(chunk, "text") and chunk.text:
+#                         full_response += chunk.text
+#                         placeholder.markdown(full_response + "▌")
 
-                placeholder.markdown(full_response)
+#                 placeholder.markdown(full_response)
 
-        except Exception as e:
-            st.error(f"Error during chat: {str(e)}")
+#         except Exception as e:
+#             st.error(f"Error during chat: {str(e)}")
 
 st.divider()
 st.write(f"Vector DB Size: {len(st.session_state.metadata)}")
