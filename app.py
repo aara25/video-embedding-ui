@@ -18,6 +18,9 @@ from langchain_core.messages import HumanMessage
 from pypdf import PdfReader
 from docx import Document
 
+from google.cloud import storage
+
+
 # -----------------------------------
 # CONFIG
 # -----------------------------------
@@ -42,6 +45,14 @@ gemini_model = GenerativeModel("gemini-2.5-flash")
 chat_model = init_chat_model("gpt-4o-mini",
     model_provider="openai",
     api_key=st.secrets["GOOGLE_API_KEY"])
+
+def upload_to_gcs(local_path, bucket_name, blob_name):
+    client = storage.Client(credentials=credentials)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_filename(local_path)
+
+    return f"gs://{bucket_name}/{blob_name}"
 
 # -----------------------------------
 # SESSION STATE
@@ -131,8 +142,9 @@ def embed_image(path):
 # VIDEO EMBEDDING (SEGMENT LEVEL)
 # -----------------------------------
 
-def embed_video(path):
-    video = Video.load_from_file(path)
+def embed_video(gcs_uri):
+    # Load video directly from GCS
+    video = Video.load_from_uri(gcs_uri)
 
     emb = embedding_model.get_embeddings(
         video=video,
@@ -145,9 +157,10 @@ def embed_video(path):
 
     for seg in emb.video_embeddings:
         vec = np.array(seg.embedding, dtype="float32")
+
         store_vector(vec, {
             "type": "video",
-            "path": path,
+            "gcs_uri": gcs_uri,
             "start": seg.start_offset_sec,
             "end": seg.end_offset_sec,
         })
@@ -155,26 +168,20 @@ def embed_video(path):
 # -----------------------------------
 # VIDEO TRANSCRIPT
 # -----------------------------------
-def transcribe_video(path):
-    with open(path, "rb") as f:
-        video_bytes = f.read()
-
-    response_stream = gemini_model.generate_content(
+def transcribe_video_gcs(gcs_uri):
+    response = gemini_model.generate_content(
         [
-            "Transcribe the speech in this video accurately in English with user diarization. "
-            "Return only the spoken words.",
-            Part.from_data(data=video_bytes, mime_type="video/mp4"),
+            "Transcribe this video accurately in English with diarization.",
+            Part.from_uri(gcs_uri, mime_type="video/mp4"),
         ],
         stream=True,
     )
 
     transcript = ""
-    placeholder = st.empty()
-
-    for chunk in response_stream:
+    for chunk in response:
         if chunk.text:
             transcript += chunk.text
-            placeholder.markdown(transcript)
+            st.write(chunk.text)
 
     return transcript
 
@@ -192,9 +199,13 @@ def summarize(text):
     placeholder = st.empty()
 
     for chunk in response_stream:
-        if chunk.text:
+        # Some chunks may not contain text
+        if hasattr(chunk, "text") and chunk.text:
             summary += chunk.text
-            placeholder.markdown(summary)
+            placeholder.markdown(summary + "▌")
+
+    # Remove cursor after completion
+    placeholder.markdown(summary)
 
     return summary
 
@@ -203,7 +214,7 @@ def summarize(text):
 # -----------------------------------
 
 st.set_page_config(page_title="Vertex Multimodal RAG", layout="wide")
-st.title("🚀 Gemini Vertex Multimodal RAG")
+st.title("Multimodal RAG")
 
 uploaded = st.file_uploader(
     "Upload PDF / DOCX / Image / Video",
@@ -246,13 +257,15 @@ if uploaded:
     elif ext == "mp4":
         st.video(uploaded)
 
-        # Step 1: Video Embedding
-        with st.spinner("Generating video segment embeddings..."):
-            embed_video(path)
+        # ---------------- Upload to GCS ----------------
+        with st.spinner("Uploading video to cloud storage..."):
+            blob_name = f"videos/{uploaded.name}"
+            gcs_uri = upload_to_gcs(path, "multimodal_rag_01", blob_name)
+
 
         # Step 2: Transcript
         with st.spinner("Transcribing video..."):
-            transcript = transcribe_video(path)
+            transcript = transcribe_video_gcs(gcs_uri)
 
             st.subheader("Transcript")
             st.write(transcript)
