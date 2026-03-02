@@ -148,8 +148,8 @@ def embed_video(gcs_uri):
         video=video,
         video_segment_config=VideoSegmentConfig(
             start_offset_sec=0,
-            end_offset_sec=60,
-            interval_sec=10,
+            end_offset_sec=8,
+            interval_sec=4,
         ),
     )
 
