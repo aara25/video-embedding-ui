@@ -265,9 +265,6 @@ if uploaded:
         with st.spinner("Transcribing video..."):
             transcript = transcribe_video_gcs(gcs_uri)
 
-            st.subheader("Transcript")
-            st.write(transcript)
-
         # Step 3: Summary
         with st.spinner("Generating summary..."):
             summary = summarize(transcript)
@@ -373,8 +370,9 @@ if st.button("Ask") and query:
         with st.container():
             st.subheader("🧠 Answer")
 
-            response_stream = chat_model.stream(
-                [HumanMessage(content=f"Context:\n{context}\n\nQuestion:{query}")]
+            response_stream = gemini_model.generate_content(
+                f"Context:\n{context}\n\nQuestion:{query}",
+                stream=True
             )
 
             full_response = ""
