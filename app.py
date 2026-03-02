@@ -169,7 +169,7 @@ def embed_video(gcs_uri):
 def transcribe_video_gcs(gcs_uri):
     response = gemini_model.generate_content(
         [
-            "Transcribe this video accurately in English with diarization.",
+            "Transcribe this video accurately in English with diarization with proper indentation.",
             Part.from_uri(gcs_uri, mime_type="video/mp4"),
         ],
         stream=True,
@@ -211,7 +211,7 @@ def summarize(text):
 # STREAMLIT UI
 # -----------------------------------
 
-st.set_page_config(page_title="Vertex Multimodal RAG", layout="wide")
+st.set_page_config(page_title="Multimodal RAG", layout="wide")
 st.title("Multimodal RAG")
 
 uploaded = st.file_uploader(
