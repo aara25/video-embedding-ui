@@ -142,7 +142,7 @@ def embed_image(path):
 
 def embed_video(gcs_uri):
     # Load video directly from GCS
-    video = Video.load_from_uri(gcs_uri)
+    video = Video.load_from_file(gcs_uri)
 
     emb = embedding_model.get_embeddings(
         video=video,
