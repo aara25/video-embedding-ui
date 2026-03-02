@@ -256,9 +256,10 @@ if uploaded:
         st.video(uploaded)
 
         # ---------------- Upload to GCS ----------------
-        with st.spinner("Uploading video to cloud storage..."):
+        with st.spinner("Uploading video to cloud storage and embedding"):
             blob_name = f"videos/{uploaded.name}"
             gcs_uri = upload_to_gcs(path, "multimodal_rag_01", blob_name)
+            embed_video(gcs_uri)
 
 
         # Step 2: Transcript
@@ -272,9 +273,9 @@ if uploaded:
         st.subheader("Summary")
         st.write(summary)
 
-        # Step 4: Store transcript embeddings
-        with st.spinner("Embedding transcript for semantic search..."):
-            embed_text_chunks(transcript, uploaded.name)
+        # # Step 4: Store transcript embeddings
+        # with st.spinner("Embedding transcript for semantic search..."):
+        #     embed_text_chunks(transcript, uploaded.name)
 
         st.success("✅ Video Processed & Embedded Successfully!")
 
