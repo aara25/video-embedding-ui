@@ -3,6 +3,7 @@ import os
 import faiss
 import numpy as np
 import tempfile
+import uuid
 
 import vertexai
 from vertexai.vision_models import (
@@ -13,48 +14,42 @@ from vertexai.vision_models import (
 )
 from vertexai.generative_models import GenerativeModel, Part
 
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage
+from google.cloud import storage
+from google.oauth2 import service_account
+
 from pypdf import PdfReader
 from docx import Document
 
-from google.cloud import storage
 
-
-# -----------------------------------
+# ==========================================
 # CONFIG
-# -----------------------------------
+# ==========================================
 
-from google.oauth2 import service_account
-
+PROJECT_ID = "video-embedding-488510"
+LOCATION = "us-central1"
+BUCKET_NAME = "multimodal-rag-bucket"
+EMBED_DIM = 1408
 
 credentials = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"]
 )
 
-PROJECT_ID = "video-embedding-488510"
-LOCATION = "us-central1"
-EMBED_DIM = 1408
-
-vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
+vertexai.init(
+    project=PROJECT_ID,
+    location=LOCATION,
+    credentials=credentials,
+)
 
 embedding_model = MultiModalEmbeddingModel.from_pretrained(
     "multimodalembedding@001"
 )
+
 gemini_model = GenerativeModel("gemini-2.5-flash")
-chat_model = GenerativeModel("gemini-2.5-flash")
 
-def upload_to_gcs(local_path, bucket_name, blob_name):
-    client = storage.Client(credentials=credentials)
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    blob.upload_from_filename(local_path)
 
-    return f"gs://{bucket_name}/{blob_name}"
-
-# -----------------------------------
+# ==========================================
 # SESSION STATE
-# -----------------------------------
+# ==========================================
 
 if "index" not in st.session_state:
     st.session_state.index = faiss.IndexFlatIP(EMBED_DIM)
@@ -68,26 +63,23 @@ def store_vector(vec, metadata):
     st.session_state.index.add(np.array([vec]).astype("float32"))
     st.session_state.metadata.append(metadata)
 
-def search(query, k=3):
-    if st.session_state.index.ntotal == 0:
-        return []
 
-    emb = embedding_model.get_embeddings(contextual_text=query)
-    query_vec = normalize(np.array(emb.text_embedding, dtype="float32"))
+# ==========================================
+# GCS UPLOAD
+# ==========================================
 
-    distances, indices = st.session_state.index.search(
-        np.array([query_vec]).astype("float32"), k
-    )
+def upload_to_gcs(local_path, filename):
+    client = storage.Client(credentials=credentials)
+    bucket = client.bucket(BUCKET_NAME)
+    blob_name = f"uploads/{uuid.uuid4()}_{filename}"
+    blob = bucket.blob(blob_name)
+    blob.upload_from_filename(local_path)
+    return f"gs://{BUCKET_NAME}/{blob_name}"
 
-    results = []
-    for idx in indices[0]:
-        if idx != -1:
-            results.append(st.session_state.metadata[idx])
-    return results
 
-# -----------------------------------
-# DOCUMENT PROCESSING
-# -----------------------------------
+# ==========================================
+# TEXT PROCESSING
+# ==========================================
 
 def extract_text_from_pdf(path):
     reader = PdfReader(path)
@@ -101,16 +93,9 @@ def extract_text_from_docx(path):
     return "\n".join([p.text for p in doc.paragraphs])
 
 def embed_text_chunks(text, source, max_chars=900):
-    """
-    Splits text safely under Vertex 1024 char limit.
-    Keeps buffer at 900 for safety.
-    """
     start = 0
-    text_length = len(text)
-
-    while start < text_length:
-        chunk = text[start:start + max_chars]
-
+    while start < len(text):
+        chunk = text[start:start+max_chars]
         emb = embedding_model.get_embeddings(contextual_text=chunk)
         vec = np.array(emb.text_embedding, dtype="float32")
 
@@ -122,9 +107,10 @@ def embed_text_chunks(text, source, max_chars=900):
 
         start += max_chars
 
-# -----------------------------------
+
+# ==========================================
 # IMAGE EMBEDDING
-# -----------------------------------
+# ==========================================
 
 def embed_image(path):
     image = Image.load_from_file(path)
@@ -136,20 +122,20 @@ def embed_image(path):
         "path": path
     })
 
-# -----------------------------------
-# VIDEO EMBEDDING (SEGMENT LEVEL)
-# -----------------------------------
+
+# ==========================================
+# VIDEO EMBEDDING (SEGMENTS)
+# ==========================================
 
 def embed_video(gcs_uri):
-    # Load video directly from GCS
-    video = Video.load_from_file(gcs_uri)
+    video = Video.load_from_uri(gcs_uri)
 
     emb = embedding_model.get_embeddings(
         video=video,
         video_segment_config=VideoSegmentConfig(
             start_offset_sec=0,
-            end_offset_sec=8,
-            interval_sec=4,
+            end_offset_sec=60,
+            interval_sec=10,
         ),
     )
 
@@ -163,56 +149,120 @@ def embed_video(gcs_uri):
             "end": seg.end_offset_sec,
         })
 
-# -----------------------------------
-# VIDEO TRANSCRIPT
-# -----------------------------------
-def transcribe_video_gcs(gcs_uri):
+
+# ==========================================
+# VIDEO TRANSCRIPTION (STREAMING)
+# ==========================================
+
+def transcribe_video(gcs_uri):
     response = gemini_model.generate_content(
         [
-            "Transcribe this video accurately in English with diarization with proper indentation.",
+            "Transcribe this video accurately in English with speaker diarization.",
             Part.from_uri(gcs_uri, mime_type="video/mp4"),
         ],
         stream=True,
     )
 
     transcript = ""
+    placeholder = st.empty()
+
     for chunk in response:
         if chunk.text:
             transcript += chunk.text
-            st.write(chunk.text)
+            placeholder.markdown(transcript + "▌")
 
+    placeholder.markdown(transcript)
     return transcript
 
-# -----------------------------------
-# SUMMARY
-# -----------------------------------
+
+# ==========================================
+# SUMMARY (STREAMING)
+# ==========================================
 
 def summarize(text):
-    response_stream = gemini_model.generate_content(
-        f"Give a concise summary of this:\n{text}",
+    response = gemini_model.generate_content(
+        f"Provide a concise summary:\n{text}",
         stream=True,
     )
 
     summary = ""
     placeholder = st.empty()
 
-    for chunk in response_stream:
-        # Some chunks may not contain text
-        if hasattr(chunk, "text") and chunk.text:
+    for chunk in response:
+        if chunk.text:
             summary += chunk.text
             placeholder.markdown(summary + "▌")
 
-    # Remove cursor after completion
     placeholder.markdown(summary)
-
     return summary
 
-# -----------------------------------
+
+# ==========================================
+# SEARCH
+# ==========================================
+
+def search(query, k=3):
+    if st.session_state.index.ntotal == 0:
+        return []
+
+    emb = embedding_model.get_embeddings(contextual_text=query)
+    query_vec = normalize(np.array(emb.text_embedding, dtype="float32"))
+
+    distances, indices = st.session_state.index.search(
+        np.array([query_vec]).astype("float32"), k
+    )
+
+    results = []
+    for score, idx in zip(distances[0], indices[0]):
+        if idx != -1:
+            results.append(st.session_state.metadata[idx])
+
+    return results
+
+
+# ==========================================
+# HYBRID CHAT
+# ==========================================
+
+def answer_query(query, item):
+
+    prompt_parts = [query]
+
+    if item["type"] == "text":
+        prompt_parts.append(f"\nContext:\n{item['content']}")
+
+    elif item["type"] == "image":
+        prompt_parts.append(
+            Part.from_data(
+                data=open(item["path"], "rb").read(),
+                mime_type="image/jpeg"
+            )
+        )
+
+    elif item["type"] == "video":
+        prompt_parts.append(
+            Part.from_uri(item["gcs_uri"], mime_type="video/mp4")
+        )
+
+    response = gemini_model.generate_content(prompt_parts, stream=True)
+
+    full_response = ""
+    placeholder = st.empty()
+
+    for chunk in response:
+        if chunk.text:
+            full_response += chunk.text
+            placeholder.markdown(full_response + "▌")
+
+    placeholder.markdown(full_response)
+
+
+# ==========================================
 # STREAMLIT UI
-# -----------------------------------
+# ==========================================
 
 st.set_page_config(page_title="Multimodal RAG", layout="wide")
-st.title("Multimodal RAG")
+st.title("🚀 Full Multimodal RAG System")
 
 uploaded = st.file_uploader(
     "Upload PDF / DOCX / Image / Video",
@@ -226,179 +276,57 @@ if uploaded:
 
     ext = uploaded.name.split(".")[-1]
 
-    # ---------------- PDF ----------------
     if ext == "pdf":
-        with st.spinner("Extracting and embedding PDF..."):
-            text = extract_text_from_pdf(path)
-            embed_text_chunks(text, uploaded.name)
+        text = extract_text_from_pdf(path)
+        embed_text_chunks(text, uploaded.name)
+        st.success("PDF Embedded!")
 
-        st.success("PDF Embedded Successfully!")
-
-    # ---------------- DOCX ----------------
     elif ext == "docx":
-        with st.spinner("Extracting and embedding DOCX..."):
-            text = extract_text_from_docx(path)
-            embed_text_chunks(text, uploaded.name)
+        text = extract_text_from_docx(path)
+        embed_text_chunks(text, uploaded.name)
+        st.success("DOCX Embedded!")
 
-        st.success("DOCX Embedded Successfully!")
-
-    # ---------------- IMAGE ----------------
     elif ext in ["jpg", "png", "jpeg"]:
         st.image(uploaded)
+        embed_image(path)
+        st.success("Image Embedded!")
 
-        with st.spinner("Generating image embedding..."):
-            embed_image(path)
-
-        st.success("Image Embedded Successfully!")
-
-    # ---------------- VIDEO ----------------
     elif ext == "mp4":
         st.video(uploaded)
 
-        # ---------------- Upload to GCS ----------------
-        with st.spinner("Uploading video to cloud storage and embedding"):
-            blob_name = f"videos/{uploaded.name}"
-            gcs_uri = upload_to_gcs(path, "multimodal_rag_01", blob_name)
-            embed_video(gcs_uri)
+        gcs_uri = upload_to_gcs(path, uploaded.name)
+        embed_video(gcs_uri)
 
-
-        # Step 2: Transcript
-        with st.spinner("Transcribing video..."):
-            transcript = transcribe_video_gcs(gcs_uri)
-
-        # Step 3: Summary
-        with st.spinner("Generating summary..."):
-            summary = summarize(transcript)
+        st.subheader("Transcript")
+        transcript = transcribe_video(gcs_uri)
 
         st.subheader("Summary")
-        st.write(summary)
+        summary = summarize(transcript)
 
-        # Step 4: Store transcript embeddings
-        # with st.spinner("Embedding transcript for semantic search..."):
-            # embed_text_chunks(transcript, uploaded.name)
+        embed_text_chunks(transcript, uploaded.name)
+        st.success("Video Processed Successfully!")
 
-        st.success("✅ Video Processed & Embedded Successfully!")
-
-def search(query, k=5):
-    if st.session_state.index.ntotal == 0:
-        return []
-
-    # Embed query
-    emb = embedding_model.get_embeddings(contextual_text=query)
-    query_vec = normalize(np.array(emb.text_embedding, dtype="float32"))
-
-    # Search FAISS
-    distances, indices = st.session_state.index.search(
-        np.array([query_vec]).astype("float32"), k
-    )
-
-    results = []
-    for score, idx in zip(distances[0], indices[0]):
-        if idx != -1:
-            item = st.session_state.metadata[idx]
-            results.append({
-                "score": float(score),
-                "data": item
-            })
-
-    return results
-
-# -----------------------------------
-# CHAT
-# -----------------------------------
 
 st.header("🔎 Semantic Search")
 
-search_query = st.text_input("Search your knowledge base")
+search_query = st.text_input("Search")
 
-if st.button("Search"):
-    results = search(search_query, k=5)
+if st.button("Search") and search_query:
+    results = search(search_query, k=3)
+    for result in results:
+        st.write(result)
 
-    if not results:
-        st.warning("No results found.")
-    else:
-        for i, result in enumerate(results, 1):
-            st.markdown(f"### Result {i}")
-            st.write(f"Similarity Score: {result['score']:.4f}")
-
-            data = result["data"]
-
-            if data["type"] == "text":
-                st.write(data["content"])
-
-            elif data["type"] == "image":
-                st.write("Image File:", data["path"])
-
-            elif data["type"] == "video":
-                st.write(
-                    f"Video Segment: {data['start']}s - {data['end']}s"
-                )
-
-            st.divider()
 
 st.header("💬 Chat with Your Data")
 
-query = st.text_input("Ask something...")
+query = st.text_input("Ask a question")
 
 if st.button("Ask") and query:
-
-    retrieved = search(query, k=5)
-
-    if not retrieved:
-        st.write("I haven't learned anything yet! Please upload some content first.")
+    results = search(query, k=1)
+    if not results:
+        st.warning("No relevant data found.")
     else:
-        item = retrieved[0]  # assuming your search returns metadata directly
-
-        file_path = item.get("path")
-        file_type = item.get("type")
-
-        # Prepare multimodal prompt
-        prompt_parts = [query]
-
-        try:
-            # -------- IMAGE --------
-            if file_type == "image" and file_path:
-                with open(file_path, "rb") as f:
-                    file_bytes = f.read()
-
-                prompt_parts.append(
-                    Part.from_data(data=file_bytes, mime_type="image/jpeg")
-                )
-
-            # -------- VIDEO --------
-            elif file_type == "video" and file_path:
-                with open(file_path, "rb") as f:
-                    file_bytes = f.read()
-
-                prompt_parts.append(
-                    Part.from_data(data=file_bytes, mime_type="video/mp4")
-                )
-
-            # -------- TEXT CONTEXT --------
-            if "content" in item:
-                prompt_parts.append(f"\nContext:\n{item['content']}")
-
-            # -------- STREAM RESPONSE --------
-            with st.container():
-                st.subheader("🧠 Answer")
-
-                response_stream = gemini_model.generate_content(
-                    prompt_parts,
-                    stream=True
-                )
-
-                full_response = ""
-                placeholder = st.empty()
-
-                for chunk in response_stream:
-                    if hasattr(chunk, "text") and chunk.text:
-                        full_response += chunk.text
-                        placeholder.markdown(full_response + "▌")
-
-                placeholder.markdown(full_response)
-
-        except Exception as e:
-            st.error(f"Error during chat: {str(e)}")
+        answer_query(query, results[0])
 
 st.divider()
 st.write(f"Vector DB Size: {len(st.session_state.metadata)}")
